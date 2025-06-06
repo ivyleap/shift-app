@@ -9,6 +9,7 @@
 <body class="flex items-center justify-center min-h-screen bg-gradient-to-r from-indigo-50 to-blue-50">
   <div class="bg-white p-8 rounded-2xl shadow-lg w-80">
     <h1 class="text-xl font-bold text-center mb-6">シフト管理ログイン</h1>
+
     <label class="block mb-2 font-medium">スタッフを選択</label>
     <select id="userSelect" class="form-select w-full mb-4 rounded-md">
       <option value="須藤">須藤</option>
@@ -18,11 +19,13 @@
       <option value="木村">木村</option>
       <option value="撫">撫</option>
     </select>
+
     <button
       onclick="login()"
       class="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
     >ログイン</button>
   </div>
+
   <script>
     function login () {
       const user = document.getElementById('userSelect').value;
