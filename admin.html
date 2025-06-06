@@ -2,142 +2,162 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>シフトカレンダー</title>
+  <title>管理者シフトビュー</title>
 
-  <!-- FullCalendar + Tailwind -->
+  <!-- FullCalendar & Tailwind -->
   <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
   <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
 
+  <!-- カレンダー色分け -->
   <style>
-    .fc-daygrid-day-frame { min-height: 56px; }  /* タップ領域 */
-    .fc-daygrid-day       { cursor: pointer; }
+    .fc-daygrid-day-frame { min-height: 60px; }
+    .badge { @apply inline-block px-2 py-0.5 rounded text-xs font-semibold text-white; }
+    .badge-出勤 { background:#3b82f6; }
+    .badge-有給 { background:#7dd3fc; }
+    .badge-欠勤 { background:#f87171; }
+    .badge-遅刻 { background:#facc15; color:#000; }
   </style>
 </head>
-<body class="p-4 bg-gray-100">
-  <h1 class="text-2xl font-bold mb-4">シフトカレンダー</h1>
+<body class="p-4 bg-gray-100 flex flex-col gap-4">
 
-  <div id="calendar"></div>
+  <h1 class="text-2xl font-bold">管理者シフトビュー</h1>
 
-  <!-- 入力モーダル -->
-  <div id="shiftModal" class="fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm hidden">
-    <div class="bg-white rounded-xl p-6 w-full max-w-xs sm:max-w-sm">
-      <h2 class="text-lg font-semibold mb-3">シフトを登録</h2>
-      <label class="block text-sm">開始</label>
-      <input id="startTime" type="time" value="09:00" class="form-input w-full mb-2">
-      <label class="block text-sm">終了</label>
-      <input id="endTime" type="time" value="18:00" class="form-input w-full mb-2">
-      <label class="block text-sm">ステータス</label>
-      <select id="status" class="form-select w-full mb-4">
-        <option value="出勤">出勤</option>
-        <option value="有給">有給</option>
-        <option value="欠勤">欠勤</option>
-        <option value="遅刻">遅刻</option>
-      </select>
-      <p class="text-xs mb-1">※複数日を選択後に保存すると一括反映します</p>
-      <button id="saveShift" class="bg-blue-600 text-white w-full py-2 rounded hover:bg-blue-700">保存</button>
+  <!-- レイアウト：左 = カレンダー / 右 = 集計 -->
+  <div class="flex flex-col lg:flex-row gap-6">
+    <!-- カレンダー -->
+    <div id="calendar" class="flex-1 bg-white rounded-xl shadow p-4"></div>
+
+    <!-- 集計パネル -->
+    <div class="w-full lg:w-96 flex flex-col gap-4">
+      <div class="bg-white rounded-xl shadow p-4">
+        <h2 class="text-lg font-semibold mb-2">月次サマリ</h2>
+        <table id="summaryTable" class="min-w-full text-sm border">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="p-1">氏名</th><th class="p-1">時間</th><th class="p-1">有給</th>
+              <th class="p-1">欠勤</th><th class="p-1">遅刻</th><th class="p-1">交通費</th><th class="p-1">支給額</th>
+            </tr>
+          </thead>
+          <tbody class="text-right text-xs"></tbody>
+        </table>
+      </div>
+
+      <button id="csvBtn" class="bg-green-600 text-white py-2 rounded shadow hover:bg-green-700">
+        CSVダウンロード
+      </button>
     </div>
   </div>
 
 <script>
-/* ========= 権限・提出状態判定 ========= */
-const isAdmin   = new URLSearchParams(location.search).get('admin') === '1';
-const submitted = JSON.parse(localStorage.getItem('shift_submitted') || 'false');
-const readOnly  = !isAdmin && submitted;  // 従業員提出後は読み取り専用
-let   selectedRange = null;
+/* ========= 従業員マスタ（必要に応じてシート連携可） ========= */
+const staffMaster = {
+  '須藤': { type:'月給', base:300000,  wage:0,   fare:0  },
+  '小林': { type:'時給', wage:1400,     fare:850 },
+  '鹿田': { type:'時給', wage:1300,     fare:650 },
+  '木村': { type:'時給', wage:1400,     fare:390 },
+  '撫'  : { type:'時給', wage:1200,     fare:530 },
+  '渡辺': { type:'時給', wage:1300,     fare:390 }
+};
+const staffNames = Object.keys(staffMaster);
 
-/* ========= FullCalendar 初期化 ========= */
-const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
-  locale: 'ja',
-  height: 'auto',
-  selectable: !readOnly,          // 提出後は従業員選択不可
-  selectMirror: true,
-  selectLongPressDelay: 0,
-  unselectAuto: false,
-  eventStartEditable: isAdmin,    // 管理者のみドラッグ編集
-  eventDurationEditable: isAdmin,
-  select(info) {                  // 日付選択
-    if (readOnly) return;
-    selectedRange = info;
-    openModal();
-  },
-  events: loadEvents(),           // 既存データ
-  eventContent(arg) {             // 表示フォーマット
-    return { html: `<b>${arg.event.title}</b>` };
-  },
-  eventClick(info) {              // タップ時の編集ブロック
-    if (info.event.extendedProps.locked && !isAdmin) {
-      alert('提出済みシフトは編集できません');
+/* ========= カレンダーイベントロード ========= */
+function loadAllEvents(){
+  const statusColors = { '出勤':'#3b82f6', '有給':'#7dd3fc', '欠勤':'#f87171', '遅刻':'#facc15' };
+  const events=[];
+  staffNames.forEach(name=>{
+    const raw = localStorage.getItem('shift_events_'+name) || '[]';
+    JSON.parse(raw).forEach(ev=>{
+      events.push({
+        title : `${name} ${ev.title}`,        // 氏名 + 9-18｜出勤
+        start : ev.date,
+        allDay: true,
+        backgroundColor: statusColors[ev.st] || '#94a3b8',
+        borderColor:     statusColors[ev.st] || '#94a3b8',
+        extendedProps:{ ...ev, staff:name }
+      });
+    });
+  });
+  return events;
+}
+
+/* ========= FullCalendar初期化 ========= */
+const calendar = new FullCalendar.Calendar(document.getElementById('calendar'),{
+  locale:'ja',
+  height:'auto',
+  events: loadAllEvents(),
+  eventClick(info){
+    // 管理者編集モーダル（シンプルに削除確認）
+    if(confirm('このシフトを削除しますか？')){
+      removeEvent(info.event.extendedProps);
+      info.event.remove();
+      updateSummary();
     }
-    // 管理者編集ロジックは必要ならここで実装
   }
 });
 calendar.render();
 
-/* ========= モーダル制御 ========= */
-function openModal(){ shiftModal.classList.remove('hidden'); }
-function closeModal(){ shiftModal.classList.add('hidden');  }
+/* ========= イベント削除 & ストレージ反映 ========= */
+function removeEvent(ext){
+  const key='shift_events_'+ext.staff;
+  const arr=JSON.parse(localStorage.getItem(key)||'[]').filter(e=>{
+    return !(e.date===ext.date && e.s===ext.s && e.e===ext.e && e.st===ext.st);
+  });
+  localStorage.setItem(key, JSON.stringify(arr));
+}
 
-/* ========= 保存 & 一括反映 ========= */
-saveShift.onclick = () => {
-  if (!selectedRange) return;
-  const s  = startTime.value;
-  const e  = endTime.value;
-  const st = status.value;
-  const title = `${s}-${e}｜${st}`;
+/* ========= 月次サマリ計算 ========= */
+function updateSummary(){
+  const tbody=document.querySelector('#summaryTable tbody');
+  tbody.innerHTML='';
+  const sumByName={};
 
-  let cur = new Date(selectedRange.start);
-  while (cur <= selectedRange.end) {
-    const dateStr = cur.toISOString().split('T')[0];
-    calendar.addEvent({
-      title,
-      start: dateStr,
-      allDay: true,
-      editable: !readOnly && isAdmin,               // 管理者可
-      extendedProps: { s, e, st, locked: readOnly } // 提出後はロック
-    });
-    cur.setDate(cur.getDate() + 1);
-  }
-  closeModal();
-  saveToStorage();
+  calendar.getEvents().forEach(ev=>{
+    const {staff, st, s, e}=ev.extendedProps;
+    if(!sumByName[staff]) sumByName[staff]={time:0,paid:0,absent:0,late:0,fareDays:new Set()};
+    if(st==='出勤'||st==='遅刻') sumByName[staff].fareDays.add(ev.startStr);
+    if(st==='有給') sumByName[staff].paid++;
+    if(st==='欠勤') sumByName[staff].absent++;
+    if(st==='遅刻') sumByName[staff].late++;
+
+    // 労働時間（休憩1h控除）
+    const dur = (hh(e)-hh(s)) - ( (hh(s)<13 && hh(e)>12) ? 1 : 0 );
+    if(st==='出勤'||st==='遅刻') sumByName[staff].time += Math.max(0,dur);
+  });
+
+  staffNames.forEach(name=>{
+    const d=sumByName[name]||{time:0,paid:0,absent:0,late:0,fareDays:new Set()};
+    const m=staffMaster[name];
+    const fareTotal = m.fare * d.fareDays.size *2;   // 往復
+    const pay = m.type==='時給' ? d.time*m.wage + fareTotal : m.base + fareTotal;
+    tbody.insertAdjacentHTML('beforeend',`
+      <tr>
+        <td class="p-1 text-left">${name}</td>
+        <td class="p-1">${d.time.toFixed(1)}</td>
+        <td class="p-1">${d.paid}</td>
+        <td class="p-1">${d.absent}</td>
+        <td class="p-1">${d.late}</td>
+        <td class="p-1">${fareTotal}</td>
+        <td class="p-1">${pay.toLocaleString()}</td>
+      </tr>`);
+  });
+}
+function hh(t){const[a,b]=t.split(':').map(Number);return a+b/60;}
+updateSummary();
+
+/* ========= CSV ダウンロード ========= */
+document.getElementById('csvBtn').onclick=()=>{
+  const rows=[['氏名','日付','開始','終了','区分']];
+  staffNames.forEach(n=>{
+    const arr=JSON.parse(localStorage.getItem('shift_events_'+n)||'[]');
+    arr.forEach(e=>rows.push([n,e.date,e.s,e.e,e.st]));
+  });
+  const csv=rows.map(r=>r.join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='all_shifts.csv';a.click();URL.revokeObjectURL(url);
 };
-
-/* ========= ローカル保存 ========= */
-function loadEvents(){
-  const raw = localStorage.getItem('shift_events') || '[]';
-  return JSON.parse(raw);
-}
-function saveToStorage(){
-  const events = calendar.getEvents().map(ev=>({
-    title: ev.title,
-    date:  ev.startStr,
-    s: ev.extendedProps.s,
-    e: ev.extendedProps.e,
-    st: ev.extendedProps.st,
-    locked: ev.extendedProps.locked || false
-  }));
-  localStorage.setItem('shift_events', JSON.stringify(events));
-}
-
-/* ========= 従業員用 提出ボタン ========= */
-if (!isAdmin) {
-  const btn = document.createElement('button');
-  btn.textContent = submitted ? '提出済み' : '提出（編集ロック）';
-  btn.disabled = submitted;
-  btn.className = 'fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg disabled:bg-gray-400';
-  btn.onclick = () => {
-    calendar.getEvents().forEach(ev=>{
-      ev.setExtendedProp('locked', true);
-      ev.setProp('editable', false);
-    });
-    localStorage.setItem('shift_submitted', 'true');
-    saveToStorage();
-    btn.textContent = '提出済み';
-    btn.disabled = true;
-    alert('提出が完了しました。以降は管理者のみ編集できます');
-  };
-  document.body.appendChild(btn);
-}
 </script>
 </body>
 </html>
