@@ -9,30 +9,24 @@
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
   <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
 
-  <!-- モバイルでタップしやすくする追加 CSS -->
   <style>
-    .fc-daygrid-day-frame { min-height: 56px; } /* 日セル高さ */
-    .fc-daygrid-day       { cursor: pointer; }  /* ポインター */
+    .fc-daygrid-day-frame { min-height: 56px; }  /* タップ領域 */
+    .fc-daygrid-day       { cursor: pointer; }
   </style>
 </head>
-
 <body class="p-4 bg-gray-100">
   <h1 class="text-2xl font-bold mb-4">シフトカレンダー</h1>
 
-  <!-- ① カレンダー表示エリア -->
   <div id="calendar"></div>
 
-  <!-- ② シフト入力モーダル -->
+  <!-- 入力モーダル -->
   <div id="shiftModal" class="fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm hidden">
     <div class="bg-white rounded-xl p-6 w-full max-w-xs sm:max-w-sm">
       <h2 class="text-lg font-semibold mb-3">シフトを登録</h2>
-
       <label class="block text-sm">開始</label>
       <input id="startTime" type="time" value="09:00" class="form-input w-full mb-2">
-
       <label class="block text-sm">終了</label>
       <input id="endTime" type="time" value="18:00" class="form-input w-full mb-2">
-
       <label class="block text-sm">ステータス</label>
       <select id="status" class="form-select w-full mb-4">
         <option value="出勤">出勤</option>
@@ -40,120 +34,110 @@
         <option value="欠勤">欠勤</option>
         <option value="遅刻">遅刻</option>
       </select>
-
-      <p class="text-xs mb-1">※複数日をカレンダーで選択後に保存してください</p>
-      <button id="saveShift" class="bg-blue-600 text-white w-full py-2 rounded hover:bg-blue-700">
-        保存
-      </button>
+      <p class="text-xs mb-1">※複数日を選択後に保存すると一括反映します</p>
+      <button id="saveShift" class="bg-blue-600 text-white w-full py-2 rounded hover:bg-blue-700">保存</button>
     </div>
   </div>
 
 <script>
-  /* ================= 共通変数 ================= */
-  // URL に ?admin=1 があれば管理者権限
-  const isAdmin = new URLSearchParams(location.search).get('admin') === '1';
-  let selectedRange = null;  // 選択範囲保持
+/* ========= 権限・提出状態判定 ========= */
+const isAdmin   = new URLSearchParams(location.search).get('admin') === '1';
+const submitted = JSON.parse(localStorage.getItem('shift_submitted') || 'false');
+const readOnly  = !isAdmin && submitted;  // 従業員提出後は読み取り専用
+let   selectedRange = null;
 
-  /* ================ カレンダー初期化 ================ */
-  const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
-    locale: 'ja',
-    height: 'auto',
-    selectable: isAdmin,            // 従業員は選択不可（管理者のみ）
-    selectMirror: true,
-    selectLongPressDelay: 0,
-    unselectAuto: false,
-
-    // 管理者はドラッグで編集可
-    eventStartEditable: isAdmin,
-    eventDurationEditable: isAdmin,
-
-    select(info) {                  // 範囲選択時
-      if (!isAdmin) return;         // 従業員は範囲選択不可
-      selectedRange = info;
-      openModal();
-    },
-
-    // 保存済みイベント読み込み
-    events: loadEvents(),
-
-    // 表示フォーマット “9:00-18:00｜出勤”
-    eventContent(arg) {
-      return { html: `<b>${arg.event.title}</b>` };
-    },
-
-    // タップで編集 or ブロック
-    eventClick(info) {
-      if (info.event.extendedProps.locked && !isAdmin) {
-        alert('提出済みシフトは編集できません');
-        return;
-      }
-      // 必要なら管理者編集ロジックをここに (削除・変更)
+/* ========= FullCalendar 初期化 ========= */
+const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+  locale: 'ja',
+  height: 'auto',
+  selectable: !readOnly,          // 提出後は従業員選択不可
+  selectMirror: true,
+  selectLongPressDelay: 0,
+  unselectAuto: false,
+  eventStartEditable: isAdmin,    // 管理者のみドラッグ編集
+  eventDurationEditable: isAdmin,
+  select(info) {                  // 日付選択
+    if (readOnly) return;
+    selectedRange = info;
+    openModal();
+  },
+  events: loadEvents(),           // 既存データ
+  eventContent(arg) {             // 表示フォーマット
+    return { html: `<b>${arg.event.title}</b>` };
+  },
+  eventClick(info) {              // タップ時の編集ブロック
+    if (info.event.extendedProps.locked && !isAdmin) {
+      alert('提出済みシフトは編集できません');
     }
-  });
-  calendar.render();
+    // 管理者編集ロジックは必要ならここで実装
+  }
+});
+calendar.render();
 
-  /* =============== モーダル制御 =============== */
-  function openModal()  { shiftModal.classList.remove('hidden'); }
-  function closeModal() { shiftModal.classList.add('hidden');  }
+/* ========= モーダル制御 ========= */
+function openModal(){ shiftModal.classList.remove('hidden'); }
+function closeModal(){ shiftModal.classList.add('hidden');  }
 
-  /* ========= 保存（複数日コピー & lock 反映） ========= */
-  saveShift.onclick = () => {
-    if (!selectedRange) return;
+/* ========= 保存 & 一括反映 ========= */
+saveShift.onclick = () => {
+  if (!selectedRange) return;
+  const s  = startTime.value;
+  const e  = endTime.value;
+  const st = status.value;
+  const title = `${s}-${e}｜${st}`;
 
-    const s  = startTime.value;
-    const e  = endTime.value;
-    const st = status.value;
-    const title = `${s}-${e}｜${st}`;
+  let cur = new Date(selectedRange.start);
+  while (cur <= selectedRange.end) {
+    const dateStr = cur.toISOString().split('T')[0];
+    calendar.addEvent({
+      title,
+      start: dateStr,
+      allDay: true,
+      editable: !readOnly && isAdmin,               // 管理者可
+      extendedProps: { s, e, st, locked: readOnly } // 提出後はロック
+    });
+    cur.setDate(cur.getDate() + 1);
+  }
+  closeModal();
+  saveToStorage();
+};
 
-    // 選択開始日〜終了日ループ
-    let cur = new Date(selectedRange.start);
-    while (cur <= selectedRange.end) {
-      const dateStr = cur.toISOString().split('T')[0];
-      calendar.addEvent({
-        title,
-        start:  dateStr,
-        allDay: true,
-        extendedProps: { s, e, st, locked: !isAdmin }, // 従業員はロック
-        editable: isAdmin
-      });
-      cur.setDate(cur.getDate() + 1);
-    }
-    closeModal();
+/* ========= ローカル保存 ========= */
+function loadEvents(){
+  const raw = localStorage.getItem('shift_events') || '[]';
+  return JSON.parse(raw);
+}
+function saveToStorage(){
+  const events = calendar.getEvents().map(ev=>({
+    title: ev.title,
+    date:  ev.startStr,
+    s: ev.extendedProps.s,
+    e: ev.extendedProps.e,
+    st: ev.extendedProps.st,
+    locked: ev.extendedProps.locked || false
+  }));
+  localStorage.setItem('shift_events', JSON.stringify(events));
+}
+
+/* ========= 従業員用 提出ボタン ========= */
+if (!isAdmin) {
+  const btn = document.createElement('button');
+  btn.textContent = submitted ? '提出済み' : '提出（編集ロック）';
+  btn.disabled = submitted;
+  btn.className = 'fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg disabled:bg-gray-400';
+  btn.onclick = () => {
+    calendar.getEvents().forEach(ev=>{
+      ev.setExtendedProp('locked', true);
+      ev.setProp('editable', false);
+    });
+    localStorage.setItem('shift_submitted', 'true');
     saveToStorage();
+    btn.textContent = '提出済み';
+    btn.disabled = true;
+    alert('提出が完了しました。以降は管理者のみ編集できます');
   };
-
-  /* =============== ローカル保存 ================= */
-  function loadEvents() {
-    const raw = localStorage.getItem('shift_events') || '[]';
-    return JSON.parse(raw);
-  }
-  function saveToStorage() {
-    const events = calendar.getEvents().map(ev => ({
-      title: ev.title,
-      date:  ev.startStr,
-      s: ev.extendedProps.s,
-      e: ev.extendedProps.e,
-      st: ev.extendedProps.st,
-      locked: ev.extendedProps.locked || false
-    }));
-    localStorage.setItem('shift_events', JSON.stringify(events));
-  }
-
-  /* ============ 従業員用「提出ボタン」 ============ */
-  if (!isAdmin) {
-    const submitBtn = document.createElement('button');
-    submitBtn.textContent = '提出（編集ロック）';
-    submitBtn.className = 'fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg';
-    submitBtn.onclick = () => {
-      calendar.getEvents().forEach(ev => {
-        ev.setExtendedProp('locked', true);
-        ev.setProp('editable', false);
-      });
-      saveToStorage();
-      alert('提出が完了しました。以降は管理者のみ編集できます');
-    };
-    document.body.appendChild(submitBtn);
-  }
+  document.body.appendChild(btn);
+}
 </script>
 </body>
 </html>
