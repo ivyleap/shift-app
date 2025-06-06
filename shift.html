@@ -1,90 +1,95 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <title>シフト管理</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
-</head>
-<body class="min-h-screen bg-gray-100 p-4">
+<!-- head 内で読み込み -->
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
 
-  <!-- ヘッダー -->
-  <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-lg p-6">
-    <div class="flex justify-between mb-4">
-      <h1 id="title" class="text-2xl font-bold text-blue-700"></h1>
-      <button onclick="logout()" class="text-red-500 hover:underline">ログアウト</button>
-    </div>
+<body class="p-4 bg-gray-100">
+  <h1 class="text-2xl font-bold mb-4">シフトカレンダー</h1>
 
-    <!-- 入力フォーム -->
-    <form id="shiftForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div><label>日付</label><input type="date"   id="dateInput"   class="form-input w-full rounded-md" required></div>
-      <div><label>開始時間</label><input type="time"  id="startInput"  class="form-input w-full rounded-md" value="09:00" required></div>
-      <div><label>終了時間</label><input type="time"  id="endInput"    class="form-input w-full rounded-md" value="18:00" required></div>
-      <div>
-        <label>区分</label>
-        <select id="statusInput" class="form-select w-full rounded-md">
-          <option value="normal">通常</option>
-          <option value="paid">有給</option>
-          <option value="absent">欠勤</option>
-          <option value="late">遅刻</option>
-        </select>
-      </div>
-      <div class="md:col-span-2">
-        <button class="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700">登録</button>
-      </div>
-    </form>
+  <!-- ① カレンダー表示エリア -->
+  <div id="calendar"></div>
 
-    <!-- 一覧 -->
-    <h2 class="text-xl font-semibold mt-6 mb-2">シフト一覧</h2>
-    <div class="overflow-auto">
-      <table class="min-w-full text-sm text-left border border-gray-300">
-        <thead class="bg-gray-50">
-          <tr>
-            <th class="p-2">日付</th><th class="p-2">開始</th><th class="p-2">終了</th>
-            <th class="p-2">区分</th><th class="p-2">休憩</th><th class="p-2">稼働</th><th class="p-2">削除</th>
-          </tr>
-        </thead>
-        <tbody id="tbody" class="divide-y divide-gray-200"></tbody>
-      </table>
+  <!-- ② シフト入力モーダル -->
+  <div id="shiftModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center">
+    <div class="bg-white rounded-xl p-6 w-80">
+      <h2 class="text-lg font-semibold mb-3">シフトを登録</h2>
+
+      <label class="block text-sm">開始</label>
+      <input id="startTime" type="time" value="09:00" class="form-input w-full mb-2">
+
+      <label class="block text-sm">終了</label>
+      <input id="endTime" type="time" value="18:00" class="form-input w-full mb-2">
+
+      <label class="block text-sm">ステータス</label>
+      <select id="status" class="form-select w-full mb-4">
+        <option value="出勤">出勤</option>
+        <option value="有給">有給</option>
+        <option value="欠勤">欠勤</option>
+        <option value="遅刻">遅刻</option>
+      </select>
+
+      <!-- ③ 複数日コピー対応 -->
+      <p class="text-xs mb-1">適用する日付をカレンダーで複数選択してください</p>
+      <button id="saveShift" class="bg-blue-600 text-white w-full py-2 rounded">保存</button>
     </div>
   </div>
 
-<script>
-const holidays = ["2025-01-01", "2025-05-01"];  // 会社休日
-function user ()        { return localStorage.getItem('currentUser'); }
-function logout ()      { localStorage.removeItem('currentUser'); location.href='index.html'; }
-function t2h(t)         { const [h,m]=t.split(':').map(Number); return h+m/60; }
-function calcH(s,e)     { let h=t2h(e)-t2h(s); if(t2h(s)<13&&t2h(e)>12) h-=1; return Math.max(0,h); }
-function key()          { return 'shifts_'+user(); }
-function save(v)        { const d=JSON.parse(localStorage.getItem(key())||'[]'); d.push(v); localStorage.setItem(key(),JSON.stringify(d)); }
-function load()         { return JSON.parse(localStorage.getItem(key())||'[]'); }
-function del(i)         { const d=load(); d.splice(i,1); localStorage.setItem(key(),JSON.stringify(d)); render(); }
+  <script>
+    // フルカレンダー初期化
+    const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+      locale: 'ja',
+      height: 'auto',
+      selectable: true,         // ← 選択範囲を取得
+      selectMirror: true,
+      select (info) {           // 日付をドラッグ or クリックで選択
+        selectedRange = info;   // グローバル格納
+        openModal();
+      },
+      events: loadEvents(),     // 既存シフト読み込み
+      eventContent(arg) {       // 表示を “9-18｜出勤” 形式に
+        return { html: `<b>${arg.event.title}</b>` };
+      }
+    });
+    calendar.render();
 
-function color(d,s){
-  const dt=new Date(d);
-  if(s==='paid') return '#bfdbfe';
-  if(s==='absent'||s==='late') return '#fecaca';
-  if(holidays.includes(d)||dt.getDay()===0||dt.getDay()===6) return '#e5e7eb';
-  return 'white';
-}
-function label(s){return s==='paid'?'有給':s==='absent'?'欠勤':s==='late'?'遅刻':'通常';}
+    // モーダル制御
+    function openModal() { document.getElementById('shiftModal').classList.remove('hidden'); }
+    function closeModal() { document.getElementById('shiftModal').classList.add('hidden'); }
 
-function render(){
-  const tb=document.getElementById('tbody'); tb.innerHTML='';
-  load().forEach((e,i)=>{
-    const tr=document.createElement('tr'); tr.style.background=color(e.date,e.status);
-    tr.innerHTML=`<td class="p-2">${e.date}</td><td class="p-2">${e.start}</td><td class="p-2">${e.end}</td>
-      <td class="p-2">${label(e.status)}</td><td class="p-2">1h</td><td class="p-2">${e.hours.toFixed(2)}h</td>
-      <td class="p-2 text-red-500 cursor-pointer" onclick="del(${i})">削除</td>`;
-    tb.appendChild(tr);
-  });
-}
-document.getElementById('shiftForm').addEventListener('submit',e=>{
-  e.preventDefault();
-  const date =dateInput.value, start=startInput.value, end=endInput.value, status=statusInput.value;
-  save({date,start,end,status,hours:calcH(start,end)}); render(); e.target.reset();
-});
-(function(){ if(!user()) location.href='index.html'; title.textContent=user()+' さんのシフト'; render(); })();
-</script>
+    // 保存ボタン
+    document.getElementById('saveShift').onclick = () => {
+      // 取得値
+      const s = document.getElementById('startTime').value;
+      const e = document.getElementById('endTime').value;
+      const st = document.getElementById('status').value;
+      const title = `${s}-${e}｜${st}`;
+
+      // 選択範囲の日付へ一括追加
+      let cur = new Date(selectedRange.start);
+      while (cur <= selectedRange.end) {
+        const dateStr = cur.toISOString().split('T')[0];
+        calendar.addEvent({ title, start: dateStr, allDay: true, extendedProps:{ s, e, st } });
+        cur.setDate(cur.getDate() + 1);
+      }
+      closeModal();
+      saveToStorage();   // ←ローカル保存 or Sheets 送信
+    };
+
+    /* ------------ ストレージ部は後で改良可能 --------------- */
+    function loadEvents() {
+      const raw = localStorage.getItem('shift_events') || '[]';
+      return JSON.parse(raw);
+    }
+    function saveToStorage() {
+      const events = calendar.getEvents().map(ev => ({
+        title: ev.title,
+        date:  ev.startStr,
+        s: ev.extendedProps.s,
+        e: ev.extendedProps.e,
+        st: ev.extendedProps.st
+      }));
+      localStorage.setItem('shift_events', JSON.stringify(events));
+    }
+    /* ------------------------------------------------------- */
+  </script>
 </body>
-</html>
