@@ -10,11 +10,22 @@
   <h1 class="text-2xl font-bold mb-4">全スタッフシフト一覧（ローカル保存データ）</h1>
   <div id="container" class="space-y-8"></div>
 
+  <!-- ✅ CSVダウンロードボタン -->
+  <div class="mt-6">
+    <button onclick="downloadCSV()" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+      CSVダウンロード
+    </button>
+  </div>
+
 <script>
 const staff = ["須藤", "渡辺", "小林", "鹿田", "木村", "撫"];
+
+// ✅ ローカルストレージから読み込む
 function load(user) {
   return JSON.parse(localStorage.getItem("shifts_" + user) || "[]");
 }
+
+// ✅ 表を作成する
 function buildTable(user, data) {
   let html = `<h2 class="text-xl font-semibold">${user}</h2>
   <table class="min-w-full text-sm border">
@@ -40,6 +51,8 @@ function buildTable(user, data) {
   html += `</tbody></table>`;
   return html;
 }
+
+// ✅ 表をすべて表示
 (function () {
   const container = document.getElementById("container");
   staff.forEach(u => {
@@ -47,6 +60,28 @@ function buildTable(user, data) {
     container.innerHTML += buildTable(u, data);
   });
 })();
+
+// ✅ CSVに変換してダウンロードする処理
+function downloadCSV() {
+  let rows = [["スタッフ", "日付", "開始", "終了", "区分", "稼働"]];
+  staff.forEach(user => {
+    const data = load(user);
+    data.forEach(e => {
+      rows.push([user, e.date, e.start, e.end, e.status, e.hours]);
+    });
+  });
+
+  const csv = rows.map(r => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "shift_data.csv";
+  a.click();
+
+  URL.revokeObjectURL(url);
+}
 </script>
 </body>
 </html>
