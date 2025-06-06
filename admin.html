@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>管理者ビュー</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+</head>
+<body class="p-4 bg-gray-100">
+  <h1 class="text-2xl font-bold mb-4">全スタッフシフト一覧（ローカル保存データ）</h1>
+  <div id="container" class="space-y-8"></div>
+
+<script>
+const staff = ["須藤", "渡辺", "小林", "鹿田", "木村", "撫"];
+function load(user) {
+  return JSON.parse(localStorage.getItem("shifts_" + user) || "[]");
+}
+function buildTable(user, data) {
+  let html = `<h2 class="text-xl font-semibold">${user}</h2>
+  <table class="min-w-full text-sm border">
+    <thead class="bg-gray-50">
+      <tr>
+        <th class="p-2">日付</th>
+        <th class="p-2">開始</th>
+        <th class="p-2">終了</th>
+        <th class="p-2">区分</th>
+        <th class="p-2">稼働</th>
+      </tr>
+    </thead>
+    <tbody>`;
+  data.forEach(e => {
+    html += `<tr class="border-b">
+      <td class="p-2">${e.date}</td>
+      <td class="p-2">${e.start}</td>
+      <td class="p-2">${e.end}</td>
+      <td class="p-2">${e.status}</td>
+      <td class="p-2">${e.hours}h</td>
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+  return html;
+}
+(function () {
+  const container = document.getElementById("container");
+  staff.forEach(u => {
+    const data = load(u);
+    container.innerHTML += buildTable(u, data);
+  });
+})();
+</script>
+</body>
+</html>
