@@ -7,25 +7,19 @@
   <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
 </head>
 <body class="min-h-screen bg-gray-100 p-4">
+
+  <!-- ヘッダー -->
   <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-lg p-6">
     <div class="flex justify-between mb-4">
       <h1 id="title" class="text-2xl font-bold text-blue-700"></h1>
       <button onclick="logout()" class="text-red-500 hover:underline">ログアウト</button>
     </div>
 
+    <!-- 入力フォーム -->
     <form id="shiftForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div>
-        <label>日付</label>
-        <input type="date" id="dateInput" class="form-input w-full rounded-md" required />
-      </div>
-      <div>
-        <label>開始時間</label>
-        <input type="time" id="startInput" class="form-input w-full rounded-md" value="09:00" required />
-      </div>
-      <div>
-        <label>終了時間</label>
-        <input type="time" id="endInput" class="form-input w-full rounded-md" value="18:00" required />
-      </div>
+      <div><label>日付</label><input type="date"   id="dateInput"   class="form-input w-full rounded-md" required></div>
+      <div><label>開始時間</label><input type="time"  id="startInput"  class="form-input w-full rounded-md" value="09:00" required></div>
+      <div><label>終了時間</label><input type="time"  id="endInput"    class="form-input w-full rounded-md" value="18:00" required></div>
       <div>
         <label>区分</label>
         <select id="statusInput" class="form-select w-full rounded-md">
@@ -40,18 +34,14 @@
       </div>
     </form>
 
+    <!-- 一覧 -->
     <h2 class="text-xl font-semibold mt-6 mb-2">シフト一覧</h2>
     <div class="overflow-auto">
       <table class="min-w-full text-sm text-left border border-gray-300">
         <thead class="bg-gray-50">
           <tr>
-            <th class="p-2">日付</th>
-            <th class="p-2">開始</th>
-            <th class="p-2">終了</th>
-            <th class="p-2">区分</th>
-            <th class="p-2">休憩</th>
-            <th class="p-2">稼働</th>
-            <th class="p-2">削除</th>
+            <th class="p-2">日付</th><th class="p-2">開始</th><th class="p-2">終了</th>
+            <th class="p-2">区分</th><th class="p-2">休憩</th><th class="p-2">稼働</th><th class="p-2">削除</th>
           </tr>
         </thead>
         <tbody id="tbody" class="divide-y divide-gray-200"></tbody>
@@ -60,89 +50,41 @@
   </div>
 
 <script>
-const companyHolidays = ["2025-01-01", "2025-05-01"];
-function getCurrentUser() {
-  return localStorage.getItem('currentUser');
-}
-function logout() {
-  localStorage.removeItem('currentUser');
-  location.href = 'login.html';
-}
-function parseTime(t) {
-  const [h, m] = t.split(':').map(Number);
-  return h + m / 60;
-}
-function calcHours(start, end) {
-  let s = parseTime(start), e = parseTime(end);
-  let h = e - s;
-  if (s < 13 && e > 12) h -= 1;
-  return Math.max(0, h);
-}
-function saveShift(entry) {
-  const user = getCurrentUser();
-  const key = 'shifts_' + user;
-  const data = JSON.parse(localStorage.getItem(key) || '[]');
-  data.push(entry);
-  localStorage.setItem(key, JSON.stringify(data));
-}
-function loadShifts() {
-  const user = getCurrentUser();
-  return JSON.parse(localStorage.getItem('shifts_' + user) || '[]');
-}
-function deleteShift(index) {
-  const user = getCurrentUser();
-  const key = 'shifts_' + user;
-  const data = loadShifts();
-  data.splice(index, 1);
-  localStorage.setItem(key, JSON.stringify(data));
-  renderTable();
-}
-function rowColor(dateStr, status) {
-  const d = new Date(dateStr);
-  if (status === 'paid') return '#bfdbfe';
-  if (status === 'absent' || status === 'late') return '#fecaca';
-  if (companyHolidays.includes(dateStr) || d.getDay() === 0 || d.getDay() === 6) return '#e5e7eb';
+const holidays = ["2025-01-01", "2025-05-01"];  // 会社休日
+function user ()        { return localStorage.getItem('currentUser'); }
+function logout ()      { localStorage.removeItem('currentUser'); location.href='index.html'; }
+function t2h(t)         { const [h,m]=t.split(':').map(Number); return h+m/60; }
+function calcH(s,e)     { let h=t2h(e)-t2h(s); if(t2h(s)<13&&t2h(e)>12) h-=1; return Math.max(0,h); }
+function key()          { return 'shifts_'+user(); }
+function save(v)        { const d=JSON.parse(localStorage.getItem(key())||'[]'); d.push(v); localStorage.setItem(key(),JSON.stringify(d)); }
+function load()         { return JSON.parse(localStorage.getItem(key())||'[]'); }
+function del(i)         { const d=load(); d.splice(i,1); localStorage.setItem(key(),JSON.stringify(d)); render(); }
+
+function color(d,s){
+  const dt=new Date(d);
+  if(s==='paid') return '#bfdbfe';
+  if(s==='absent'||s==='late') return '#fecaca';
+  if(holidays.includes(d)||dt.getDay()===0||dt.getDay()===6) return '#e5e7eb';
   return 'white';
 }
-function displayStatus(v) {
-  return v === 'paid' ? '有給' : v === 'absent' ? '欠勤' : v === 'late' ? '遅刻' : '通常';
-}
-function renderTable() {
-  const data = loadShifts();
-  const tbody = document.getElementById('tbody');
-  tbody.innerHTML = '';
-  data.forEach((e, i) => {
-    const tr = document.createElement('tr');
-    tr.style.background = rowColor(e.date, e.status);
-    tr.innerHTML = `
-      <td class="p-2">${e.date}</td>
-      <td class="p-2">${e.start}</td>
-      <td class="p-2">${e.end}</td>
-      <td class="p-2">${displayStatus(e.status)}</td>
-      <td class="p-2">1h</td>
-      <td class="p-2">${e.hours.toFixed(2)}h</td>
-      <td class="p-2 text-red-500 cursor-pointer" onclick="deleteShift(${i})">削除</td>
-    `;
-    tbody.appendChild(tr);
+function label(s){return s==='paid'?'有給':s==='absent'?'欠勤':s==='late'?'遅刻':'通常';}
+
+function render(){
+  const tb=document.getElementById('tbody'); tb.innerHTML='';
+  load().forEach((e,i)=>{
+    const tr=document.createElement('tr'); tr.style.background=color(e.date,e.status);
+    tr.innerHTML=`<td class="p-2">${e.date}</td><td class="p-2">${e.start}</td><td class="p-2">${e.end}</td>
+      <td class="p-2">${label(e.status)}</td><td class="p-2">1h</td><td class="p-2">${e.hours.toFixed(2)}h</td>
+      <td class="p-2 text-red-500 cursor-pointer" onclick="del(${i})">削除</td>`;
+    tb.appendChild(tr);
   });
 }
-document.getElementById('shiftForm').addEventListener('submit', function(e) {
+document.getElementById('shiftForm').addEventListener('submit',e=>{
   e.preventDefault();
-  const date = document.getElementById('dateInput').value;
-  const start = document.getElementById('startInput').value;
-  const end = document.getElementById('endInput').value;
-  const status = document.getElementById('statusInput').value;
-  const hours = calcHours(start, end);
-  saveShift({ date, start, end, status, hours });
-  renderTable();
-  this.reset();
+  const date =dateInput.value, start=startInput.value, end=endInput.value, status=statusInput.value;
+  save({date,start,end,status,hours:calcH(start,end)}); render(); e.target.reset();
 });
-(function init() {
-  const user = getCurrentUser();
-  if (!user) location.href = 'login.html';
-  document.getElementById('title').innerText = user + ' さんのシフト';
-  renderTable();
-})();
+(function(){ if(!user()) location.href='index.html'; title.textContent=user()+' さんのシフト'; render(); })();
 </script>
 </body>
 </html>
