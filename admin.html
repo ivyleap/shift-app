@@ -8,80 +8,89 @@
 </head>
 <body class="p-4 bg-gray-100">
   <h1 class="text-2xl font-bold mb-4">全スタッフシフト一覧（ローカル保存データ）</h1>
-  <div id="container" class="space-y-8"></div>
 
-  <!-- ✅ CSVダウンロードボタン -->
-  <div class="mt-6">
+  <div id="container" class="space-y-10"></div>
+
+  <!-- CSV ダウンロード -->
+  <div class="mt-8">
     <button onclick="downloadCSV()" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
       CSVダウンロード
     </button>
   </div>
 
 <script>
-const staff = ["須藤", "渡辺", "小林", "鹿田", "木村", "撫"];
+/* ====== 設定 ====== */
+const staff  = ["須藤","渡辺","小林","鹿田","木村","撫"];
+const header = ["日付","開始","終了","休憩","稼働時間","区分"];
 
-// ✅ ローカルストレージから読み込む
-function load(user) {
-  return JSON.parse(localStorage.getItem("shifts_" + user) || "[]");
-}
+/* ====== ユーティリティ ====== */
+function load(u){ return JSON.parse(localStorage.getItem('shifts_'+u)||'[]'); }
 
-// ✅ 表を作成する
-function buildTable(user, data) {
-  let html = `<h2 class="text-xl font-semibold">${user}</h2>
-  <table class="min-w-full text-sm border">
-    <thead class="bg-gray-50">
-      <tr>
-        <th class="p-2">日付</th>
-        <th class="p-2">開始</th>
-        <th class="p-2">終了</th>
-        <th class="p-2">区分</th>
-        <th class="p-2">稼働</th>
-      </tr>
-    </thead>
-    <tbody>`;
-  data.forEach(e => {
-    html += `<tr class="border-b">
+/* ====== テーブル作成（月別） ====== */
+function buildMonthTable(data){
+  let rows = data.map(e=>`
+    <tr class="border-b">
       <td class="p-2">${e.date}</td>
       <td class="p-2">${e.start}</td>
       <td class="p-2">${e.end}</td>
-      <td class="p-2">${e.status}</td>
+      <td class="p-2">1h</td>
       <td class="p-2">${e.hours}h</td>
-    </tr>`;
+      <td class="p-2">${e.status}</td>
+    </tr>`).join("");
+
+  return `
+    <table class="min-w-full text-sm border mb-6">
+      <thead class="bg-gray-50">
+        <tr>${header.map(h=>`<th class="p-2">${h}</th>`).join("")}</tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+/* ====== スタッフごとに描画 ====== */
+function buildStaffBlock(user,data){
+  if(!data.length) return `<h2 class="text-xl font-semibold">${user}</h2><p class="mb-6 text-gray-400">データなし</p>`;
+
+  // 月別にグループ化
+  const byMonth = {};
+  data.forEach(e=>{
+    const m = e.date.slice(0,7);   // "YYYY-MM"
+    (byMonth[m] = byMonth[m] || []).push(e);
   });
-  html += `</tbody></table>`;
+
+  // 月ソート（新→旧）
+  const months = Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+
+  let html = `<h2 class="text-xl font-semibold mb-2">${user}</h2>`;
+  months.forEach(m=>{
+    html += `<h3 class="font-bold mb-1">${m}</h3>`;
+    html += buildMonthTable(byMonth[m]);
+  });
   return html;
 }
 
-// ✅ 表をすべて表示
-(function () {
-  const container = document.getElementById("container");
-  staff.forEach(u => {
-    const data = load(u);
-    container.innerHTML += buildTable(u, data);
-  });
-})();
-
-// ✅ CSVに変換してダウンロードする処理
-function downloadCSV() {
-  let rows = [["スタッフ", "日付", "開始", "終了", "区分", "稼働"]];
-  staff.forEach(user => {
-    const data = load(user);
-    data.forEach(e => {
-      rows.push([user, e.date, e.start, e.end, e.status, e.hours]);
-    });
-  });
-
-  const csv = rows.map(r => r.join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "shift_data.csv";
-  a.click();
-
+/* ====== CSV ダウンロード ====== */
+function downloadCSV(){
+  const rows=[["スタッフ",...header]];
+  staff.forEach(u=>load(u).forEach(e=>{
+    rows.push([u,e.date,e.start,e.end,"1h",e.hours,e.status]);
+  }));
+  const csv=rows.map(r=>r.join(",")).join("\\n");
+  const blob=new Blob([csv],{type:"text/csv"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download="shift_data.csv"; a.click();
   URL.revokeObjectURL(url);
 }
+
+/* ====== 初期描画 ====== */
+(function(){
+  const container=document.getElementById("container");
+  staff.forEach(u=>{
+    const html=buildStaffBlock(u, load(u));
+    container.insertAdjacentHTML("beforeend",html);
+  });
+})();
 </script>
 </body>
 </html>
